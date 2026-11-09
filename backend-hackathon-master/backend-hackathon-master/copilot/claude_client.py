@@ -11,7 +11,7 @@ from datetime import datetime
 import google.generativeai as genai
 
 from config import get_settings
-from ai.gemini_client import resolve_model_name
+from ai.gemini_client import is_quota_error, model_candidates, resolve_model_name
 
 settings = get_settings()
 
@@ -92,7 +92,7 @@ Current time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
             # Run synchronous Gemini calls in thread pool
             loop = asyncio.get_event_loop()
             
-            def _chat_sync():
+            def _chat_sync(model):
                 # Build conversation history for Gemini
                 history = []
                 
@@ -103,7 +103,7 @@ Current time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
                         history.append({"role": role, "parts": [msg["content"]]})
                 
                 # Start chat with history
-                chat = self.model.start_chat(history=history)
+                chat = model.start_chat(history=history)
                 
                 # Send current message with system context prepended
                 system_prompt = self._create_system_prompt(context or {})
@@ -112,12 +112,24 @@ Current time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
                 response = chat.send_message(full_message)
                 return response.text
             
-            response_text = await loop.run_in_executor(None, _chat_sync)
-            
+            # Each model has its own free-tier quota; on 429 move on to the next available model
+            for model_name in model_candidates(self.model_name):
+                model = self.model if model_name == self.model_name else genai.GenerativeModel(model_name)
+                try:
+                    response_text = await loop.run_in_executor(None, _chat_sync, model)
+                    break
+                except Exception as e:
+                    if not is_quota_error(e):
+                        raise
+                    print(f"[Copilot] Quota exceeded for {model_name}, trying next model")
+                    quota_error = e
+            else:
+                raise quota_error
+
             return {
                 "success": True,
                 "response": response_text,
-                "model": self.model_name,
+                "model": model_name,
                 "timestamp": datetime.utcnow().isoformat()
             }
             

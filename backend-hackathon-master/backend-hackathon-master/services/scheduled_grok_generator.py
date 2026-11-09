@@ -387,15 +387,21 @@ class ScheduledGrokGenerator:
                 if alert_manager.confirmation_filter.get_confirmed(machine.machine_id):
                     return result
 
-                print(f"[GrokScheduler] {machine.name}: TIER 3 CRITICAL - Triggering Gemini diagnosis")
+                pending = alert_manager.confirmation_filter.get_pending(machine.machine_id)
+                if pending:
+                    # The second confirmation only re-checks the sensors; reuse the first
+                    # diagnosis rather than spending another Gemini request (free tier: ~20/day)
+                    diagnosis = pending["diagnosis"]
+                else:
+                    print(f"[GrokScheduler] {machine.name}: TIER 3 CRITICAL - Triggering Gemini diagnosis")
 
-                # Get diagnosis from Gemini
-                diagnosis = await gemini_client.diagnose_failure(
-                    machine_id=machine.machine_id,
-                    machine_type=machine.type,
-                    sensor_data=sensor_values,
-                    tier_info=result['tier']
-                )
+                    # Get diagnosis from Gemini
+                    diagnosis = await gemini_client.diagnose_failure(
+                        machine_id=machine.machine_id,
+                        machine_type=machine.type,
+                        sensor_data=sensor_values,
+                        tier_info=result['tier']
+                    )
 
                 # Process through alert manager (2-confirmation system)
                 alert_manager.db = db

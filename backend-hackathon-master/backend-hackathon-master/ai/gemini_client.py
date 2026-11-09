@@ -14,15 +14,22 @@ from config import get_settings
 
 settings = get_settings()
 
-STABLE_FLASH = re.compile(r"gemini-(\d+(?:\.\d+)*)-flash")
+STABLE_FLASH = re.compile(r"gemini-(\d+(?:\.\d+)*)-flash(-lite)?")
+MAX_MODEL_ATTEMPTS = 4
+
+
+def is_quota_error(error: Exception) -> bool:
+    text = str(error)
+    return "429" in text or "quota" in text.lower()
 
 
 @lru_cache()
-def resolve_model_name(preferred: str) -> str:
+def model_candidates(preferred: str) -> tuple:
     """
-    Use the preferred model if the configured key can still call it, otherwise the newest
-    stable Flash model. Google retires model versions, after which a hardcoded name 404s.
-    Call after genai.configure().
+    Models to try in order: the preferred one if the configured key can still call it, then
+    stable Flash models newest-first, then Flash-Lite. Google retires model versions (a
+    hardcoded name then 404s), and each model has its own free-tier quota, so callers move
+    down this list on 429. Call after genai.configure().
     """
     try:
         available = {
@@ -32,18 +39,24 @@ def resolve_model_name(preferred: str) -> str:
         }
     except Exception as e:
         print(f"[Gemini] Could not list models ({e}); using {preferred}")
-        return preferred
+        return (preferred,)
 
-    if preferred in available:
-        return preferred
-    stable = [m for m in available if STABLE_FLASH.fullmatch(m)]
-    if stable:
-        chosen = max(stable, key=lambda m: tuple(int(p) for p in STABLE_FLASH.fullmatch(m).group(1).split(".")))
-    elif "gemini-flash-latest" in available:
-        chosen = "gemini-flash-latest"
-    else:
-        chosen = next((m for m in sorted(available) if "flash" in m), preferred)
-    print(f"[Gemini] Model '{preferred}' is not available; using '{chosen}'")
+    def rank(name):
+        match = STABLE_FLASH.fullmatch(name)
+        return (bool(match.group(2)), tuple(-int(p) for p in match.group(1).split(".")))
+
+    stable = sorted((m for m in available if STABLE_FLASH.fullmatch(m)), key=rank)
+    candidates = ([preferred] if preferred in available else []) + [m for m in stable if m != preferred]
+    if not candidates:
+        candidates = [m for m in sorted(available) if "flash" in m] or [preferred]
+    return tuple(candidates[:MAX_MODEL_ATTEMPTS])
+
+
+def resolve_model_name(preferred: str) -> str:
+    """The model to use by default (first candidate)."""
+    chosen = model_candidates(preferred)[0]
+    if chosen != preferred:
+        print(f"[Gemini] Model '{preferred}' is not available; using '{chosen}'")
     return chosen
 
 
@@ -111,13 +124,21 @@ class GeminiClient:
         
         # Try current key, then fallback keys on quota errors
         while self.current_key_index < len(self.api_keys):
-            try:
-                response = await self.model.generate_content_async(prompt)
-                
+            # Each model has its own quota, so try the other available models before the next key
+            for model_name in model_candidates(self.model_name):
+                try:
+                    model = self.model if model_name == self.model_name else genai.GenerativeModel(model_name)
+                    response = await model.generate_content_async(prompt)
+                    text = response.text
+                except Exception as e:
+                    if is_quota_error(e):
+                        print(f"[Gemini] Quota exceeded for {model_name} (key #{self.current_key_index + 1}), trying fallback...")
+                        continue
+                    print(f"Gemini API error: {e}")
+                    return self._mock_diagnosis(machine_id, machine_type, sensor_data, tier_info)
+
                 # Parse JSON from response
                 try:
-                    # Try to extract JSON from response text
-                    text = response.text
                     # Find JSON block
                     if "```json" in text:
                         json_str = text.split("```json")[1].split("```")[0]
@@ -125,25 +146,21 @@ class GeminiClient:
                         json_str = text.split("```")[1].split("```")[0]
                     else:
                         json_str = text
-                    
+
                     diagnosis = json.loads(json_str.strip())
                     return diagnosis
-                    
+
                 except json.JSONDecodeError:
                     # Fallback if JSON parsing fails
                     return self._parse_text_response(text, machine_id, sensor_data)
-                    
-            except Exception as e:
-                error_str = str(e)
-                # Check if it's a quota error - try fallback key
-                if "429" in error_str or "quota" in error_str.lower():
-                    print(f"[Gemini] Quota exceeded for key #{self.current_key_index + 1}, trying fallback...")
-                    if self._switch_to_next_key():
-                        continue  # Retry with new key
-                
-                print(f"Gemini API error: {e}")
-                return self._mock_diagnosis(machine_id, machine_type, sensor_data, tier_info)
-        
+
+            # Every model is out of quota on this key
+            if not self._switch_to_next_key():
+                # Out of quota everywhere for now; quotas reset, so start from the first key next time
+                self.current_key_index = 0
+                self._configure_with_next_key()
+                break
+
         # All keys exhausted, use mock
         return self._mock_diagnosis(machine_id, machine_type, sensor_data, tier_info)
     
