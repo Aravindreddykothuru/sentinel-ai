@@ -9,6 +9,8 @@ class Settings(BaseSettings):
 
     # AI API Keys
     GOOGLE_API_KEY: str = ""
+    # Falls back to the newest available Flash model if this one is retired
+    GEMINI_MODEL: str = "gemini-flash-latest"
     XAI_API_KEY: str = ""
 
     # Gmail SMTP

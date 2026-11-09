@@ -4,13 +4,47 @@ Used for failure diagnosis and maintenance scheduling.
 """
 
 import os
+import re
 import json
+from functools import lru_cache
 from typing import Dict, Optional
 from datetime import datetime
 import google.generativeai as genai
 from config import get_settings
 
 settings = get_settings()
+
+STABLE_FLASH = re.compile(r"gemini-(\d+(?:\.\d+)*)-flash")
+
+
+@lru_cache()
+def resolve_model_name(preferred: str) -> str:
+    """
+    Use the preferred model if the configured key can still call it, otherwise the newest
+    stable Flash model. Google retires model versions, after which a hardcoded name 404s.
+    Call after genai.configure().
+    """
+    try:
+        available = {
+            m.name.removeprefix("models/")
+            for m in genai.list_models()
+            if "generateContent" in m.supported_generation_methods
+        }
+    except Exception as e:
+        print(f"[Gemini] Could not list models ({e}); using {preferred}")
+        return preferred
+
+    if preferred in available:
+        return preferred
+    stable = [m for m in available if STABLE_FLASH.fullmatch(m)]
+    if stable:
+        chosen = max(stable, key=lambda m: tuple(int(p) for p in STABLE_FLASH.fullmatch(m).group(1).split(".")))
+    elif "gemini-flash-latest" in available:
+        chosen = "gemini-flash-latest"
+    else:
+        chosen = next((m for m in sorted(available) if "flash" in m), preferred)
+    print(f"[Gemini] Model '{preferred}' is not available; using '{chosen}'")
+    return chosen
 
 
 class GeminiClient:
@@ -25,7 +59,7 @@ class GeminiClient:
         keys = api_key or settings.GOOGLE_API_KEY or os.getenv("GOOGLE_API_KEY", "")
         self.api_keys = [k.strip() for k in keys.split(",") if k.strip()]
         self.current_key_index = 0
-        self.model_name = "gemini-2.5-flash"
+        self.model_name = settings.GEMINI_MODEL
         self.model = None
         
         # Initialize with first available key
@@ -37,9 +71,10 @@ class GeminiClient:
             key = self.api_keys[self.current_key_index]
             try:
                 genai.configure(api_key=key)
+                self.model_name = resolve_model_name(self.model_name)
                 self.model = genai.GenerativeModel(self.model_name)
                 self.api_key = key
-                print(f"[Gemini] Configured with API key #{self.current_key_index + 1}")
+                print(f"[Gemini] Configured with API key #{self.current_key_index + 1} ({self.model_name})")
                 return True
             except Exception as e:
                 print(f"[Gemini] Failed to configure key #{self.current_key_index + 1}: {e}")

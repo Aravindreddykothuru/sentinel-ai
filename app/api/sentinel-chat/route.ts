@@ -33,7 +33,7 @@ You are an expert in industrial machinery diagnostics, predictive maintenance, v
 
   const google = createGoogleGenerativeAI({ apiKey: googleApiKey })
   const result = streamText({
-    model: google('gemini-2.5-flash'),
+    model: google(process.env.GEMINI_MODEL || 'gemini-flash-latest'),
     system: systemPrompt,
     messages: await convertToModelMessages(messages),
     abortSignal: req.signal,

@@ -11,6 +11,7 @@ from datetime import datetime
 import google.generativeai as genai
 
 from config import get_settings
+from ai.gemini_client import resolve_model_name
 
 settings = get_settings()
 
@@ -24,11 +25,12 @@ class CopilotClient:
     def __init__(self):
         keys = settings.GOOGLE_API_KEY or os.getenv("GOOGLE_API_KEY", "")
         self.api_key = keys.split(",")[0].strip()
-        self.model_name = "gemini-2.0-flash"
+        self.model_name = settings.GEMINI_MODEL
         self.model = None
-        
+
         if self.api_key:
             genai.configure(api_key=self.api_key)
+            self.model_name = resolve_model_name(self.model_name)
             self.model = genai.GenerativeModel(self.model_name)
     
     def is_configured(self) -> bool:
