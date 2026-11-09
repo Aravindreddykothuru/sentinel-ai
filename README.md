@@ -1,9 +1,22 @@
 # SENTINEL AI — Predictive Maintenance
 
+## Live
+
+| | Link |
+|---|---|
+| Dashboard | https://sentinel-ai-frontend-hackathon-mast.vercel.app |
+| Backend API | https://sentinel-ai-backend-qxqy.onrender.com |
+| API docs | https://sentinel-ai-backend-qxqy.onrender.com/docs |
+| Health check | https://sentinel-ai-backend-qxqy.onrender.com/health |
+
+The backend runs on Render's free tier and sleeps when idle, so the first visit can take about a minute to show live data.
+
+## Structure
+
 | Part | Path | Stack | Hosting (free) |
 |---|---|---|---|
 | Frontend | repo root | Next.js 16, React 19 | Vercel (Hobby) |
-| Backend | `backend-hackathon-master/backend-hackathon-master` | FastAPI, WebSockets, SQLite, Gemini | Render — https://sentinel-ai-backend-qxqy.onrender.com |
+| Backend | `backend-hackathon-master/backend-hackathon-master` | FastAPI, WebSockets, SQLite, Gemini | Render |
 
 ## How they connect
 
