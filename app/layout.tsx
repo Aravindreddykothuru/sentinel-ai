@@ -1,30 +1,27 @@
 import type { Metadata } from 'next'
-import { Orbitron, Share_Tech_Mono } from 'next/font/google'
+import { IBM_Plex_Sans, IBM_Plex_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 
-const orbitron = Orbitron({
+const plexSans = IBM_Plex_Sans({
   subsets: ['latin'],
-  variable: '--font-orbitron',
-  weight: ['400', '500', '600', '700', '800', '900'],
+  variable: '--font-plex-sans',
+  weight: ['400', '500', '600'],
 })
-const shareTechMono = Share_Tech_Mono({
+const plexMono = IBM_Plex_Mono({
   subsets: ['latin'],
-  variable: '--font-mono',
-  weight: '400',
+  variable: '--font-plex-mono',
+  weight: ['400', '500'],
 })
 
 export const metadata: Metadata = {
-  title: 'SENTINEL AI — Predictive Maintenance Dashboard',
-  description: 'Industrial AI predictive maintenance system for PLANT-7 NORTH manufacturing facility.',
-  generator: 'v0.app',
+  title: 'Sentinel AI · Plant-7 North',
+  description: 'Live condition monitoring and predictive maintenance for the machines at Plant-7 North.',
 }
 
 export const viewport = {
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
 }
 
 export default function RootLayout({
@@ -34,7 +31,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${orbitron.variable} ${shareTechMono.variable} font-mono antialiased`}>
+      <body className={`${plexSans.variable} ${plexMono.variable} font-sans antialiased`}>
         {children}
         <Analytics />
       </body>

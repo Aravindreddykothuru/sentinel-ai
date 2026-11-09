@@ -31,7 +31,7 @@ const INITIAL_ALERTS: Alert[] = [
 ]
 
 const INITIAL_MAINTENANCE: MaintenanceItem[] = [
-  { id: 'm1', machine: 'Pump Gamma',      action: 'Emergency bearing replacement + seal inspection', scheduledTime: 'TODAY — ASAP',       estimatedSavings: '$180K', priority: 'critical' },
+  { id: 'm1', machine: 'Pump Gamma',      action: 'Emergency bearing replacement + seal inspection', scheduledTime: 'Today',              estimatedSavings: '$180K', priority: 'critical' },
   { id: 'm2', machine: 'Compressor Beta', action: 'Pressure valve calibration + vibration dampener',  scheduledTime: 'Within 48 hours',   estimatedSavings: '$45K',  priority: 'warning' },
   { id: 'm3', machine: 'Turbine Alpha',   action: 'Scheduled oil change + filter replacement',        scheduledTime: 'In 14 days',         estimatedSavings: '$12K',  priority: 'ok' },
 ]
@@ -130,6 +130,8 @@ export default function SentinelDashboard() {
   const machinesRef = useRef(machines)
   machinesRef.current = machines
   const lastAutoAlertRef = useRef<Record<string, number>>({})
+  const lastStressToastRef = useRef<Record<string, number>>({})
+  const hasBackendDataRef = useRef(false)
 
   // Unique per tab: the backend keys sockets by client id, so a shared id would kick other viewers off
   const [wsUrl] = useState(() => `${ENDPOINTS.websocket}/frontend-${Math.random().toString(36).slice(2, 10)}`)
@@ -195,9 +197,12 @@ export default function SentinelDashboard() {
       try {
         const data = await fetchApi(ENDPOINTS.machines)
         if (data.machines && data.machines.length > 0) {
+          // The first real answer replaces the offline demo history; later refetches keep live history
+          const keepHistory = hasBackendDataRef.current
+          hasBackendDataRef.current = true
           setMachines(prev => data.machines.map((m: any) => ({
             ...toFrontendMachine(m),
-            history: prev.find(p => p.id === m.machine_id)?.history ?? [],
+            history: keepHistory ? prev.find(p => p.id === m.machine_id)?.history ?? [] : [],
           })))
           if (!data.machines.some((m: any) => m.machine_id === selectedIdRef.current)) {
             setSelectedId(data.machines[0].machine_id)
@@ -259,7 +264,7 @@ export default function SentinelDashboard() {
           id: `auto-${++alertIdCounter}`,
           level: 'critical',
           machine: m.name,
-          message: `Failure probability at ${m.sensorData.failureProbability.toFixed(0)}% — immediate action required`,
+          message: `Failure risk at ${m.sensorData.failureProbability.toFixed(0)}%, inspect now`,
           timestamp: ts,
         }
 
@@ -286,7 +291,7 @@ export default function SentinelDashboard() {
             {
               id: `toast-${nowMs}-${m.id}`,
               type: 'critical',
-              message: `🚨 Alert sent to ${assignedMechanic.name} for ${m.name}`,
+              message: `Alert sent to ${assignedMechanic.name} for ${m.name}`,
               mechanicName: assignedMechanic.name,
               machineName: m.name,
             },
@@ -347,7 +352,6 @@ export default function SentinelDashboard() {
 
   const selectedMachine = machines.find(m => m.id === selectedId) || machines[0]
   const criticalCount = alerts.filter(a => a.level === 'critical').length
-  const uptime = 99.2
 
   // ─── Apply stress test values to selected machine ────────────────
   useEffect(() => {
@@ -396,11 +400,12 @@ export default function SentinelDashboard() {
       const now = new Date()
       const ts = now.toLocaleTimeString('en-US', { hour12: false })
 
+      const faults = [stress.temperature > 110 && 'overheating', stress.vibration > 6 && 'excessive vibration'].filter(Boolean).join(' and ')
       const newAlert: Alert = {
         id: `stress-${Date.now()}`,
         level: 'critical',
         machine: machineName,
-        message: `STRESS TEST: ${stress.temperature > 110 ? 'Overheating' : ''} ${stress.vibration > 6 ? 'Excessive vibration' : ''} detected`,
+        message: `Stress test: ${faults} detected`,
         timestamp: ts,
       }
 
@@ -411,29 +416,32 @@ export default function SentinelDashboard() {
         return [newAlert, ...prev.slice(0, 19)]
       })
 
-      // Show toast
-      setToasts(prev => [{
-        id: `toast-${Date.now()}`,
-        type: 'critical',
-        message: `🚨 Stress test alert: ${machineName} - Critical thresholds exceeded!`,
-      }, ...prev.slice(0, 4)])
+      // Show toast, at most once a minute per machine (auto mode changes values every 1.5 s)
+      if (Date.now() - (lastStressToastRef.current[machineName] ?? 0) > 60_000) {
+        lastStressToastRef.current[machineName] = Date.now()
+        setToasts(prev => [{
+          id: `toast-${Date.now()}`,
+          type: 'critical',
+          message: `Stress test: ${machineName} crossed its critical limits`,
+        }, ...prev.slice(0, 4)])
+      }
     }
   }, [stress.active, stress.temperature, stress.vibration, stress.rpm, stress.pressure, selectedId])
 
   return (
-    <div className="scanline-overlay grid-bg min-h-screen flex flex-col bg-[#060b18] overflow-hidden text-sm">
+    <div className="flex min-h-screen flex-col bg-page lg:h-screen lg:overflow-hidden">
       <ToastContainer
         toasts={toasts}
         onRemove={(id) => setToasts(prev => prev.filter(t => t.id !== id))}
       />
       <SentinelHeader
+        machines={machines}
         criticalCount={criticalCount}
-        uptime={uptime}
-        machineCount={machines.length}
+        isConnected={isConnected}
       />
 
-      {/* Main 3-column layout */}
-      <div className="flex flex-1 overflow-hidden border-t border-[#1a2a45] max-w-[100vw]">
+      {/* Main 3-column layout; stacks on small screens */}
+      <div className="flex flex-1 flex-col lg:flex-row lg:overflow-hidden">
         <LeftColumn
           machines={machines}
           selectedId={selectedId}
@@ -444,13 +452,7 @@ export default function SentinelDashboard() {
           onAddMachine={handleAddMachine}
         />
 
-        {/* Divider */}
-        <div className="w-px bg-[#1a2a45] shrink-0" />
-
         <CenterColumn machine={selectedMachine} />
-
-        {/* Divider */}
-        <div className="w-px bg-[#1a2a45] shrink-0" />
 
         <RightColumn
           machine={selectedMachine}

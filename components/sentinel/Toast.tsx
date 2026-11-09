@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { AlertCircle, CheckCircle, X } from 'lucide-react'
 import type { Toast as ToastType } from '@/lib/sentinel-types'
 
@@ -10,33 +10,34 @@ interface ToastContainerProps {
 }
 
 export function Toast({ toast, onRemove }: { toast: ToastType; onRemove: () => void }) {
+  // The parent re-renders with every live reading and passes a new callback each time;
+  // keying the timer on it would restart the countdown forever
+  const onRemoveRef = useRef(onRemove)
+  onRemoveRef.current = onRemove
   useEffect(() => {
-    const timer = setTimeout(onRemove, 4000)
+    const timer = setTimeout(() => onRemoveRef.current(), 4000)
     return () => clearTimeout(timer)
-  }, [onRemove])
+  }, [])
 
   const isSuccess = toast.type === 'success'
 
   return (
     <div
-      className={`flex items-center gap-3 px-4 py-3 rounded-lg border animate-slideInRight ${
-        isSuccess
-          ? 'bg-[#00c896]/10 border-[#00c896]/30 text-[#00c896]'
-          : 'bg-[#ef4444]/10 border-[#ef4444]/30 text-[#ef4444]'
-      }`}
-      style={{ backdropFilter: 'blur(12px)', boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }}
+      role="status"
+      className="animate-enter flex w-[340px] items-center gap-3 rounded-xl border border-line-strong bg-raised px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.4)]"
     >
       {isSuccess ? (
-        <CheckCircle className="w-4 h-4 shrink-0" />
+        <CheckCircle className="h-4 w-4 shrink-0 text-ok" strokeWidth={1.5} />
       ) : (
-        <AlertCircle className="w-4 h-4 shrink-0" />
+        <AlertCircle className="h-4 w-4 shrink-0 text-crit" strokeWidth={1.5} />
       )}
-      <span className="text-[12px] font-mono flex-1">{toast.message}</span>
+      <span className="flex-1 text-[13px] leading-5 text-fg">{toast.message}</span>
       <button
         onClick={onRemove}
-        className="text-current opacity-60 hover:opacity-100 transition-opacity"
+        aria-label="Dismiss"
+        className="rounded-md p-1 text-fg-3 transition-colors duration-150 hover:text-fg"
       >
-        <X className="w-3.5 h-3.5" />
+        <X className="h-4 w-4" strokeWidth={1.5} />
       </button>
     </div>
   )
@@ -44,14 +45,13 @@ export function Toast({ toast, onRemove }: { toast: ToastType; onRemove: () => v
 
 export function ToastContainer({ toasts, onRemove }: ToastContainerProps) {
   return (
-    <div className="fixed bottom-4 right-4 z-40 flex flex-col gap-2 pointer-events-auto">
+    <div className="fixed bottom-4 right-4 z-40 flex flex-col gap-2" aria-live="polite">
       {toasts.map(toast => (
-        <div key={toast.id} className="pointer-events-auto">
-          <Toast
-            toast={toast}
-            onRemove={() => onRemove(toast.id)}
-          />
-        </div>
+        <Toast
+          key={toast.id}
+          toast={toast}
+          onRemove={() => onRemove(toast.id)}
+        />
       ))}
     </div>
   )

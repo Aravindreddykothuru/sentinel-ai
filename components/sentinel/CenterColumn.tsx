@@ -3,235 +3,197 @@
 import type { Machine, HistoryPoint } from '@/lib/sentinel-types'
 import { useState } from 'react'
 import {
-  AreaChart, Area, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea,
 } from 'recharts'
-import { Thermometer, Zap, Gauge, Activity } from 'lucide-react'
+import {
+  SENSORS, STATUS, COLORS, BAND_COLOR, bandState, formatReading, sensorsOutOfBand, type SensorKey,
+} from '@/lib/sentinel-status'
 
-// ─── Circular Gauge ────────────────────────────────────────────────
-interface CircularGaugeProps {
+// ─── Instrument dial ───────────────────────────────────────────────
+// A 240° dial: the scale, the machine's normal band on it, and a needle that turns
+// warn/crit once the reading leaves that band.
+const MONO = { fontFamily: 'var(--font-plex-mono)' }
+const SANS = { fontFamily: 'var(--font-plex-sans)' }
+const CX = 80
+const CY = 76
+const R = 58
+const START = 150
+const SWEEP = 240
+
+function polar(angle: number, radius: number) {
+  const a = (angle * Math.PI) / 180
+  return [CX + radius * Math.cos(a), CY + radius * Math.sin(a)]
+}
+
+function arcPath(from: number, to: number, radius: number) {
+  const [x1, y1] = polar(from, radius)
+  const [x2, y2] = polar(to, radius)
+  const large = to - from > 180 ? 1 : 0
+  return `M ${x1} ${y1} A ${radius} ${radius} 0 ${large} 1 ${x2} ${y2}`
+}
+
+interface InstrumentProps {
   label: string
-  value: number
   unit: string
-  min: number
-  max: number
-  threshold: number
-  icon: React.ReactNode
+  value: number
+  decimals: number
+  scale: [number, number]
+  band: { min: number; max: number }
 }
 
-function CircularGauge({ label, value, unit, min, max, threshold, icon }: CircularGaugeProps) {
-  const pct = Math.min(1, Math.max(0, (value - min) / (max - min)))
-  const isOver = value > threshold
-  const color = isOver ? '#ef4444' : pct > 0.75 ? '#e5a000' : '#00c896'
-  const r = 36
-  const circumference = Math.PI * r  // half-circle
-  const offset = circumference - pct * circumference
+function Instrument({ label, unit, value, decimals, scale, band }: InstrumentProps) {
+  const [lo, hi] = scale
+  const toAngle = (v: number) => START + (Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo) * SWEEP
+  const state = bandState(value, band)
+  const needleColor = BAND_COLOR[state]
+  const ticks = Array.from({ length: 25 }, (_, i) => START + (i * SWEEP) / 24)
 
   return (
-    <div className="flex flex-col items-center bg-[#111827] border border-[#1e293b] rounded-lg p-3 flex-1" style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.02)' }}>
-      <p className="text-[9px] text-[#64748b] tracking-widest uppercase mb-1">{label}</p>
-      <div className="relative">
-        <svg width="88" height="52" viewBox="0 0 88 52">
-          {/* Track */}
-          <path
-            d="M 8 48 A 36 36 0 0 1 80 48"
-            fill="none"
-            stroke="#1e293b"
-            strokeWidth="7"
-            strokeLinecap="round"
-          />
-          {/* Value arc */}
-          <path
-            d="M 8 48 A 36 36 0 0 1 80 48"
-            fill="none"
-            stroke={color}
-            strokeWidth="7"
-            strokeLinecap="round"
-            strokeDasharray={circumference}
-            strokeDashoffset={offset}
-            style={{
-              transition: 'stroke-dashoffset 0.5s ease, stroke 0.3s ease',
-              filter: `drop-shadow(0 0 6px ${color}50)`,
-            }}
-          />
-          {/* Icon */}
-          <foreignObject x="36" y="10" width="16" height="16">
-            <div className="text-[#64748b]" style={{ transform: 'scale(0.7)' }}>
-              {icon}
-            </div>
-          </foreignObject>
-        </svg>
-        <div className="absolute bottom-0 left-0 right-0 text-center">
-          <span className={`text-[18px] font-bold font-sans leading-none`} style={{ color }}>
-            {value.toFixed(value < 100 ? 1 : 0)}
-          </span>
-          <span className="text-[9px] text-[#64748b] ml-0.5">{unit}</span>
-        </div>
-      </div>
-      <div className="flex items-center gap-1 mt-1">
-        {isOver && <span className="text-[9px] text-[#ef4444] font-bold animate-pulse-dot">OVER THRESHOLD</span>}
-        {!isOver && <span className="text-[9px] text-[#475569]">Thresh: {threshold}{unit}</span>}
-      </div>
-    </div>
-  )
-}
-
-// ─── Digital Twin SVG ──────────────────────────────────────────────
-function DigitalTwin({ machine }: { machine: Machine }) {
-  const h = machine.sensorData.health
-  const bodyColor = h > 70 ? '#00c896' : h > 40 ? '#e5a000' : '#ef4444'
-  const isCritical = machine.status === 'critical'
-  const statusLabel = machine.status === 'critical' ? 'CRITICAL \u2014 FAILURE IMMINENT' : machine.status === 'warning' ? 'DEGRADING \u2014 MONITOR CLOSELY' : 'OPERATING NORMALLY'
-
-  return (
-    <div className="flex flex-col items-center gap-3">
-      <svg width="320" height="220" viewBox="0 0 320 220" className="w-full max-w-sm">
-        {/* Background grid */}
-        <defs>
-          <pattern id="twinGrid" width="20" height="20" patternUnits="userSpaceOnUse">
-            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(0,200,150,0.03)" strokeWidth="0.5"/>
-          </pattern>
-          <filter id="glow">
-            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
-            <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-        </defs>
-        <rect width="320" height="220" fill="url(#twinGrid)" rx="8" />
-
-        {/* Machine body */}
-        <rect
-          x="90" y="70" width="140" height="100" rx="10"
-          fill={`${bodyColor}12`}
-          stroke={bodyColor}
-          strokeWidth="1.5"
-          filter="url(#glow)"
-          style={{ transition: 'fill 0.5s, stroke 0.5s' }}
-        />
-
-        {/* Rotating gear */}
-        <g transform="translate(160, 120)">
-          <circle r="18" fill="none" stroke={bodyColor} strokeWidth="1.5" opacity="0.5" />
-          <circle r="6" fill={bodyColor} opacity="0.7" />
-          {[0,45,90,135,180,225,270,315].map((deg) => (
-            <rect
-              key={deg}
-              x="-3" y="-24"
-              width="6" height="8"
-              rx="2"
-              fill={bodyColor}
-              transform={`rotate(${deg})`}
-              style={{ transition: 'fill 0.4s' }}
-            />
-          ))}
-          <animateTransform
-            attributeName="transform"
-            type="rotate"
-            from="0 0 0"
-            to="360 0 0"
-            dur={isCritical ? '0.8s' : '3s'}
-            repeatCount="indefinite"
-            additive="sum"
-          />
+    <div className="flex min-w-0 flex-col items-center px-2 py-4">
+      <p className="text-[13px] text-fg-2">{label}</p>
+      <svg viewBox="0 0 160 124" className="mt-1 w-full max-w-[176px]" role="img" aria-label={`${label} ${formatReading(value, decimals)} ${unit}, normal ${band.min} to ${band.max}`}>
+        {/* Scale */}
+        <path d={arcPath(START, START + SWEEP, R)} fill="none" stroke={COLORS.raised} strokeWidth="6" />
+        {/* Normal band: the product's signature */}
+        <path d={arcPath(toAngle(band.min), toAngle(band.max), R)} fill="none" stroke={COLORS.ok} strokeOpacity="0.45" strokeWidth="6" />
+        {ticks.map((a, i) => {
+          const major = i % 6 === 0
+          const [x1, y1] = polar(a, major ? 44 : 47)
+          const [x2, y2] = polar(a, 50)
+          return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={major ? COLORS.fg3 : COLORS.lineStrong} strokeWidth={major ? 1.5 : 1} />
+        })}
+        {/* Needle */}
+        <g style={{ transform: `rotate(${toAngle(value)}deg)`, transformOrigin: `${CX}px ${CY}px`, transition: 'transform 400ms cubic-bezier(0.22, 1, 0.36, 1)' }}>
+          <line x1={CX - 8} y1={CY} x2={CX + 52} y2={CY} stroke={needleColor} strokeWidth="2" strokeLinecap="round" style={{ transition: 'stroke 180ms' }} />
         </g>
-
-        {/* Pipes */}
-        <line x1="20" y1="120" x2="90" y2="120" stroke="#1e293b" strokeWidth="8" strokeLinecap="round" />
-        <line x1="20" y1="120" x2="90" y2="120" stroke={bodyColor} strokeWidth="2"
-          strokeDasharray="6 4" opacity="0.6">
-          <animate attributeName="stroke-dashoffset" from="20" to="0" dur="1s" repeatCount="indefinite" />
-        </line>
-        <line x1="230" y1="120" x2="300" y2="120" stroke="#1e293b" strokeWidth="8" strokeLinecap="round" />
-        <line x1="230" y1="120" x2="300" y2="120" stroke={bodyColor} strokeWidth="2"
-          strokeDasharray="6 4" opacity="0.6">
-          <animate attributeName="stroke-dashoffset" from="0" to="20" dur="1s" repeatCount="indefinite" />
-        </line>
-        <line x1="160" y1="20" x2="160" y2="70" stroke="#1e293b" strokeWidth="8" strokeLinecap="round" />
-        <line x1="160" y1="20" x2="160" y2="70" stroke={bodyColor} strokeWidth="2"
-          strokeDasharray="6 4" opacity="0.6">
-          <animate attributeName="stroke-dashoffset" from="20" to="0" dur="0.7s" repeatCount="indefinite" />
-        </line>
-        <line x1="160" y1="170" x2="160" y2="210" stroke="#1e293b" strokeWidth="8" strokeLinecap="round" />
-        <line x1="160" y1="170" x2="160" y2="210" stroke={bodyColor} strokeWidth="2"
-          strokeDasharray="6 4" opacity="0.6">
-          <animate attributeName="stroke-dashoffset" from="0" to="20" dur="0.7s" repeatCount="indefinite" />
-        </line>
-
-        {/* Sensor dots */}
-        {[
-          { cx: 90,  cy: 88,  label: 'TEMP', sensor: 'temperature', normal: machine.sensorData.temperature < (machine.normalRanges?.temperature?.max ?? 100) },
-          { cx: 230, cy: 88,  label: 'VIB',  sensor: 'vibration',   normal: machine.sensorData.vibration   < (machine.normalRanges?.vibration?.max ?? 3)   },
-          { cx: 90,  cy: 158, label: 'PRES', sensor: 'pressure',    normal: machine.sensorData.pressure    < (machine.normalRanges?.pressure?.max ?? 100)  },
-          { cx: 230, cy: 158, label: 'RPM',  sensor: 'rpm',         normal: machine.sensorData.rpm         < (machine.normalRanges?.rpm?.max ?? 3500)      },
-        ].map(({ cx, cy, label, normal }) => (
-          <g key={label}>
-            <circle cx={cx} cy={cy} r="8" fill={normal ? '#00c896' : '#ef4444'} opacity="0.15" />
-            <circle cx={cx} cy={cy} r="4" fill={normal ? '#00c896' : '#ef4444'} />
-            <text x={cx} y={cy - 12} textAnchor="middle" fontSize="8" fill="#64748b" fontFamily="monospace">
-              {label}
-            </text>
-          </g>
-        ))}
+        <circle cx={CX} cy={CY} r="5" fill={COLORS.panel} stroke={needleColor} strokeWidth="2" style={{ transition: 'stroke 180ms' }} />
+        {/* Scale ends */}
+        <text x={polar(START, 58)[0]} y={polar(START, 58)[1] + 16} textAnchor="middle" fontSize="11" fill={COLORS.fg3} style={MONO}>{lo}</text>
+        <text x={polar(START + SWEEP, 58)[0]} y={polar(START + SWEEP, 58)[1] + 16} textAnchor="middle" fontSize="11" fill={COLORS.fg3} style={MONO}>{hi}</text>
       </svg>
-
-      <div className={`text-[11px] font-sans font-bold tracking-widest px-4 py-1.5 rounded-lg border ${
-        machine.status === 'critical' ? 'bg-[#ef4444]/10 border-[#ef4444]/30 text-[#ef4444]' :
-        machine.status === 'warning'  ? 'bg-[#e5a000]/10 border-[#e5a000]/30 text-[#e5a000]' :
-                                        'bg-[#00c896]/10 border-[#00c896]/30 text-[#00c896]'
-      }`}>
-        {statusLabel}
-      </div>
+      <p className="mt-1 font-mono text-[24px] font-medium leading-none tabular-nums" style={{ color: needleColor }}>
+        {formatReading(value, decimals)}
+        <span className="ml-1 text-[13px] font-normal text-fg-3">{unit}</span>
+      </p>
+      <p className="mt-2 font-mono text-[12px] text-fg-3">
+        Normal {band.min}–{band.max}
+      </p>
     </div>
   )
 }
 
-// ─── Sensor Charts ─────────────────────────────────────────────────
-function SensorCharts({ history }: { history: HistoryPoint[] }) {
+// ─── Digital twin: a schematic with each sensor's live reading ─────
+function DigitalTwin({ machine }: { machine: Machine }) {
+  const points: { key: SensorKey; x: number; y: number; anchor: 'end' | 'start' }[] = [
+    { key: 'temperature', x: 120, y: 92,  anchor: 'end' },
+    { key: 'vibration',   x: 280, y: 92,  anchor: 'start' },
+    { key: 'pressure',    x: 120, y: 172, anchor: 'end' },
+    { key: 'rpm',         x: 280, y: 172, anchor: 'start' },
+  ]
+  const status = STATUS[machine.status]
+
   return (
-    <div className="flex flex-col gap-4">
-      {/* Health + Failure Probability */}
+    <div className="flex flex-col items-center gap-4">
+      <svg viewBox="0 0 400 248" className="w-full max-w-[520px]" role="img" aria-label={`Schematic of ${machine.name}`}>
+        {/* Feed and outlet lines */}
+        <line x1="24" y1="132" x2="120" y2="132" stroke={COLORS.lineStrong} strokeWidth="6" strokeLinecap="round" />
+        <line x1="280" y1="132" x2="376" y2="132" stroke={COLORS.lineStrong} strokeWidth="6" strokeLinecap="round" />
+        <line x1="200" y1="24" x2="200" y2="72" stroke={COLORS.lineStrong} strokeWidth="6" strokeLinecap="round" />
+        <line x1="200" y1="192" x2="200" y2="232" stroke={COLORS.lineStrong} strokeWidth="6" strokeLinecap="round" />
+        {/* Housing */}
+        <rect x="120" y="72" width="160" height="120" rx="12" fill={COLORS.raised} stroke={COLORS.lineStrong} />
+        {/* Rotor */}
+        <circle cx="200" cy="132" r="24" fill="none" stroke={COLORS.fg3} strokeWidth="1.5" />
+        <circle cx="200" cy="132" r="6" fill={COLORS.fg3} />
+        {[0, 60, 120, 180, 240, 300].map(deg => {
+          const a = (deg * Math.PI) / 180
+          return <line key={deg} x1={200 + 8 * Math.cos(a)} y1={132 + 8 * Math.sin(a)} x2={200 + 22 * Math.cos(a)} y2={132 + 22 * Math.sin(a)} stroke={COLORS.fg3} strokeWidth="1.5" />
+        })}
+        {/* Sensor points with their readings */}
+        {points.map(p => {
+          const meta = SENSORS.find(s => s.key === p.key)!
+          const value = machine.sensorData[p.key]
+          const state = bandState(value, machine.normalRanges[p.key])
+          const color = state === 'in' ? COLORS.ok : BAND_COLOR[state]
+          const tx = p.anchor === 'end' ? p.x - 12 : p.x + 12
+          return (
+            <g key={p.key}>
+              <circle cx={p.x} cy={p.y} r="5" fill={color} />
+              <text x={tx} y={p.y - 4} textAnchor={p.anchor} fontSize="11" fill={COLORS.fg3} style={SANS}>{meta.label}</text>
+              <text x={tx} y={p.y + 12} textAnchor={p.anchor} fontSize="13" fill={state === 'in' ? COLORS.fg : color} style={MONO}>
+                {formatReading(value, meta.decimals)} {meta.unit}
+              </text>
+            </g>
+          )
+        })}
+      </svg>
+      <p className="flex items-center gap-2 text-[13px] text-fg-2">
+        <span className={`h-2 w-2 rounded-full ${status.dot}`} />
+        {status.label}
+        {machine.status !== 'normal' && <span className="text-fg-3">· time to failure {machine.sensorData.timeToFailure}</span>}
+      </p>
+    </div>
+  )
+}
+
+// ─── Sensor charts: risk over time, then each sensor against its band ─────
+const axisTick = { fill: COLORS.fg3, fontSize: 11 }
+const tooltipStyle = { background: COLORS.panel, border: `1px solid ${COLORS.lineStrong}`, borderRadius: 8, fontSize: 12, color: COLORS.fg }
+
+function SensorCharts({ machine }: { machine: Machine }) {
+  const history = machine.history
+
+  if (history.length < 2) {
+    return <p className="py-16 text-center text-[13px] text-fg-3">Collecting readings, the charts fill in every 2 seconds</p>
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
       <div>
-        <p className="text-[10px] text-[#64748b] tracking-widest mb-2">HEALTH % vs FAILURE PROBABILITY %</p>
-        <div className="h-40">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={history} margin={{ top: 5, right: 5, bottom: 0, left: -20 }}>
-              <defs>
-                <linearGradient id="healthGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#00c896" stopOpacity={0.25} />
-                  <stop offset="95%" stopColor="#00c896" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="failGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#ef4444" stopOpacity={0.25} />
-                  <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
-              <XAxis dataKey="t" hide />
-              <YAxis domain={[0, 100]} tick={{ fill: '#64748b', fontSize: 9 }} />
-              <Tooltip contentStyle={{ background: '#111827', border: '1px solid #1e293b', fontSize: 11, color: '#e8ecf4', borderRadius: 8 }} />
-              <Area type="monotone" dataKey="health" name="Health %" stroke="#00c896" fill="url(#healthGrad)" strokeWidth={2} dot={false} />
-              <Area type="monotone" dataKey="failureProbability" name="Fail Prob %" stroke="#ef4444" fill="url(#failGrad)" strokeWidth={2} dot={false} />
-            </AreaChart>
-          </ResponsiveContainer>
+        <div className="mb-3 flex items-center gap-4 text-[12px]">
+          <p className="text-[13px] text-fg-2">Health and failure risk</p>
+          <span className="ml-auto flex items-center gap-2 text-fg-3"><span className="h-0.5 w-3 bg-signal" />Health</span>
+          <span className="flex items-center gap-2 text-fg-3"><span className="h-0.5 w-3 bg-fg-3" />Failure risk</span>
         </div>
-      </div>
-      {/* Temp / Pressure / Vibration */}
-      <div>
-        <p className="text-[10px] text-[#64748b] tracking-widest mb-2">TEMPERATURE / PRESSURE / VIBRATION</p>
-        <div className="h-40">
+        <div className="h-56">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={history} margin={{ top: 5, right: 5, bottom: 0, left: -20 }}>
-              <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
+            <LineChart data={history} margin={{ top: 4, right: 4, bottom: 0, left: -24 }}>
+              <CartesianGrid stroke={COLORS.line} vertical={false} />
               <XAxis dataKey="t" hide />
-              <YAxis tick={{ fill: '#64748b', fontSize: 9 }} />
-              <Tooltip contentStyle={{ background: '#111827', border: '1px solid #1e293b', fontSize: 11, color: '#e8ecf4', borderRadius: 8 }} />
-              <Legend iconSize={8} wrapperStyle={{ fontSize: 10, color: '#64748b' }} />
-              <Line type="monotone" dataKey="temperature" name="Temp °C" stroke="#ef4444" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="pressure"    name="Press bar" stroke="#38bdf8" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="vibration"   name="Vib mm/s" stroke="#e5a000" strokeWidth={2} dot={false} />
+              <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tick={axisTick} axisLine={false} tickLine={false} />
+              <Tooltip contentStyle={tooltipStyle} labelFormatter={() => ''} formatter={(v: number) => `${v.toFixed(0)}%`} />
+              <Line type="monotone" dataKey="health" name="Health" stroke={COLORS.signal} strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line type="monotone" dataKey="failureProbability" name="Failure risk" stroke={COLORS.fg3} strokeWidth={1.5} strokeDasharray="4 4" dot={false} isAnimationActive={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>
       </div>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        {SENSORS.filter(s => s.key !== 'rpm').map(s => {
+          const band = machine.normalRanges[s.key]
+          return (
+            <div key={s.key} className="rounded-lg border border-line p-3">
+              <div className="mb-2 flex items-baseline justify-between">
+                <p className="text-[12px] text-fg-2">{s.label}</p>
+                <p className="font-mono text-[12px] text-fg-3">{s.unit}</p>
+              </div>
+              <div className="h-24">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={history} margin={{ top: 4, right: 4, bottom: 0, left: -28 }}>
+                    <ReferenceArea y1={band.min} y2={band.max} fill={COLORS.ok} fillOpacity={0.08} ifOverflow="extendDomain" />
+                    <XAxis dataKey="t" hide />
+                    <YAxis tick={axisTick} axisLine={false} tickLine={false} width={48} domain={['auto', 'auto']} />
+                    <Tooltip contentStyle={tooltipStyle} labelFormatter={() => ''} formatter={(v: number) => `${formatReading(v, s.decimals)} ${s.unit}`} />
+                    <Line type="monotone" dataKey={s.key} name={s.label} stroke={COLORS.fg2} strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <p className="-mt-2 text-[12px] text-fg-3">Shaded area is the machine's normal operating range</p>
     </div>
   )
 }
@@ -246,82 +208,69 @@ function ROICalculator() {
   const savings = annualLoss * 0.72
   const roi = savings / (machines * 15000)
 
+  const sliders = [
+    { label: 'Machines', value: machines, display: `${machines}`, min: 1, max: 200, step: 1, set: setMachines },
+    { label: 'Downtime per machine, hours a year', value: downtime, display: `${downtime} h`, min: 1, max: 200, step: 1, set: setDowntime },
+    { label: 'Cost of an hour of downtime', value: hourCost, display: `$${(hourCost / 1000).toFixed(0)}K`, min: 1000, max: 100000, step: 1000, set: setHourCost },
+  ]
+
   return (
-    <div className="space-y-4">
-      <p className="text-[10px] text-[#64748b] tracking-widest">ADJUST PARAMETERS TO CALCULATE ROI</p>
-
-      <div>
-        <div className="flex justify-between mb-1">
-          <span className="text-[11px] text-[#94a3b8]">Number of Machines</span>
-          <span className="text-[13px] font-bold text-[#e5a000] font-mono">{machines}</span>
-        </div>
-        <input type="range" min={1} max={200} value={machines} onChange={(e) => setMachines(Number(e.target.value))}
-          className="w-full range-amber" style={{ background: `linear-gradient(to right, #e5a000 ${machines/2}%, #1e293b ${machines/2}%)` }} />
+    <div className="grid gap-6 md:grid-cols-[1fr_280px]">
+      <div className="space-y-5">
+        {sliders.map(s => {
+          const pct = ((s.value - s.min) / (s.max - s.min)) * 100
+          return (
+            <div key={s.label}>
+              <div className="mb-2 flex items-baseline justify-between">
+                <span className="text-[13px] text-fg-2">{s.label}</span>
+                <span className="font-mono text-[13px] tabular-nums text-fg">{s.display}</span>
+              </div>
+              <input
+                type="range" min={s.min} max={s.max} step={s.step} value={s.value} aria-label={s.label}
+                onChange={(e) => s.set(Number(e.target.value))}
+                className="w-full"
+                style={{ background: `linear-gradient(to right, ${COLORS.fg2} ${pct}%, ${COLORS.raised} ${pct}%)` }}
+              />
+            </div>
+          )
+        })}
       </div>
-
-      <div>
-        <div className="flex justify-between mb-1">
-          <span className="text-[11px] text-[#94a3b8]">Avg Downtime Hours / Year</span>
-          <span className="text-[13px] font-bold text-[#e5a000] font-mono">{downtime}h</span>
+      <div className="flex flex-col gap-3">
+        <div className="rounded-xl border border-line bg-deep p-4">
+          <p className="text-[13px] text-fg-2">Estimated annual savings</p>
+          <p className="mt-2 font-mono text-[28px] font-medium leading-none tabular-nums text-fg">${(savings / 1_000_000).toFixed(1)}M</p>
         </div>
-        <input type="range" min={1} max={200} value={downtime} onChange={(e) => setDowntime(Number(e.target.value))}
-          className="w-full range-amber" style={{ background: `linear-gradient(to right, #e5a000 ${downtime/2}%, #1e293b ${downtime/2}%)` }} />
-      </div>
-
-      <div>
-        <div className="flex justify-between mb-1">
-          <span className="text-[11px] text-[#94a3b8]">Hourly Downtime Cost</span>
-          <span className="text-[13px] font-bold text-[#e5a000] font-mono">${(hourCost/1000).toFixed(0)}K</span>
+        <div className="rounded-xl border border-line bg-deep p-4">
+          <p className="text-[13px] text-fg-2">Return on cost</p>
+          <p className="mt-2 font-mono text-[28px] font-medium leading-none tabular-nums text-fg">{roi.toFixed(1)}×</p>
         </div>
-        <input type="range" min={1000} max={100000} step={1000} value={hourCost} onChange={(e) => setHourCost(Number(e.target.value))}
-          className="w-full range-amber" style={{ background: `linear-gradient(to right, #e5a000 ${(hourCost-1000)/990}%, #1e293b ${(hourCost-1000)/990}%)` }} />
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 pt-2">
-        <div className="bg-[#0a0e17] border border-[#e5a000]/20 rounded-lg p-3 text-center" style={{ boxShadow: '0 0 20px rgba(229,160,0,0.05)' }}>
-          <p className="text-[9px] text-[#64748b] tracking-widest mb-1">ANNUAL SAVINGS</p>
-          <p className="text-[22px] font-bold font-sans text-[#e5a000] glow-amber">${(savings/1_000_000).toFixed(1)}M</p>
-          <p className="text-[9px] text-[#475569]">72% of prevented loss</p>
-        </div>
-        <div className="bg-[#0a0e17] border border-[#00c896]/20 rounded-lg p-3 text-center" style={{ boxShadow: '0 0 20px rgba(0,200,150,0.05)' }}>
-          <p className="text-[9px] text-[#64748b] tracking-widest mb-1">ROI MULTIPLE</p>
-          <p className="text-[22px] font-bold font-sans text-[#00c896] glow-green">{roi.toFixed(1)}x</p>
-          <p className="text-[9px] text-[#475569]">vs implementation cost</p>
-        </div>
+        <p className="text-[12px] leading-5 text-fg-3">Assumes 72% of downtime is prevented and $15K to set up each machine</p>
       </div>
     </div>
   )
 }
 
-// ─── AI Insight Banner ─────────────────────────────────────────────
-function AIInsightBanner({ machine }: { machine: Machine }) {
-  const isCritical = machine.status === 'critical'
-  const isWarning  = machine.status === 'warning'
+// ─── Assessment: what the live readings say, in plain words ────────
+function Assessment({ machine }: { machine: Machine }) {
+  const out = sensorsOutOfBand(machine)
+  const outList = out.map(s => s.label).join(', ')
+  const status = STATUS[machine.status]
 
-  const msg = isCritical
-    ? `CRITICAL: ${machine.name} exhibits cascading failure pattern \u2014 elevated vibration (${machine.sensorData.vibration.toFixed(1)} mm/s) combined with thermal spike indicates bearing degradation. Isolation Forest anomaly score: 0.94. Estimated failure in ${machine.sensorData.timeToFailure}. Immediate shutdown recommended.`
-    : isWarning
-    ? `WARNING: Early degradation detected in ${machine.name}. Temperature trending ${((machine.sensorData.temperature / (machine.normalRanges?.temperature?.max ?? 100)) * 100).toFixed(0)}% of max threshold. Autoencoder reconstruction error rising. Schedule inspection within 48\u201372 hours.`
-    : `${machine.name} is operating within normal parameters. All sensor readings nominal. Autoencoder reconstruction error: 0.012. No anomalies detected. Next scheduled maintenance in 14 days.`
+  const msg = machine.status === 'critical'
+    ? `${machine.name} is outside its normal range on ${outList || 'several sensors'}. Failure risk is ${machine.sensorData.failureProbability.toFixed(0)}% with an estimated ${machine.sensorData.timeToFailure} to failure. The Gemini diagnosis and recommended action are in the alert feed.`
+    : machine.status === 'warning'
+    ? `${machine.name} is drifting${outList ? `: ${outList} above normal` : ''}. Failure risk is ${machine.sensorData.failureProbability.toFixed(0)}%. Plan an inspection before it reaches the alarm limits.`
+    : `All four sensors on ${machine.name} are within their normal ranges.`
 
   return (
-    <div className={`rounded-lg p-3 flex items-start gap-3 border ${
-      isCritical ? 'bg-[#ef4444]/5 border-[#ef4444]/20' :
-      isWarning  ? 'bg-[#e5a000]/5 border-[#e5a000]/20' :
-                   'bg-[#38bdf8]/5 border-[#38bdf8]/20'
-    }`}
-      style={{ background: isCritical ? 'linear-gradient(135deg, rgba(239,68,68,0.06) 0%, rgba(0,200,150,0.02) 100%)' : isWarning ? 'linear-gradient(135deg, rgba(229,160,0,0.06) 0%, rgba(0,200,150,0.02) 100%)' : 'linear-gradient(135deg, rgba(56,189,248,0.06) 0%, rgba(0,200,150,0.02) 100%)' }}
-    >
-      <Zap className={`w-4 h-4 shrink-0 mt-0.5 ${isCritical ? 'text-[#ef4444]' : isWarning ? 'text-[#e5a000]' : 'text-[#38bdf8]'}`} />
-      <div className="flex-1 min-w-0">
-        <p className="text-[11px] text-[#cbd5e1] leading-relaxed">{msg}</p>
-        <p className="text-[9px] text-[#475569] mt-1">
-          Model Confidence: <span className="text-[#38bdf8]">94.7%</span>
-          <span className="mx-2 text-[#1e293b]">|</span>
-          <span className="text-[#64748b]">Isolation Forest + Keras Autoencoder</span>
-        </p>
+    <section className="rounded-xl border border-line bg-panel p-5">
+      <div className="flex items-center gap-2">
+        <span className={`h-2 w-2 rounded-full ${status.dot}`} />
+        <h3 className="text-[14px] font-medium text-fg">Assessment</h3>
       </div>
-    </div>
+      <p className="mt-2 max-w-[72ch] text-[14px] leading-6 text-fg-2">{msg}</p>
+      <p className="mt-3 font-mono text-[12px] text-fg-3">Live readings every 2 s · threshold analysis every 60 s · diagnosis by Gemini</p>
+    </section>
   )
 }
 
@@ -335,61 +284,76 @@ type Tab = 'twin' | 'charts' | 'roi'
 export default function CenterColumn({ machine }: CenterColumnProps) {
   const [tab, setTab] = useState<Tab>('twin')
   const sd = machine.sensorData
+  const status = STATUS[machine.status]
+  const health = Math.max(0, Math.min(100, sd.health))
+  const healthColor = health < 40 ? COLORS.crit : health < 70 ? COLORS.warn : COLORS.fg2
 
   return (
-    <main className="flex-1 flex flex-col gap-3 overflow-y-auto min-w-0 p-3 bg-[#0a0e17]">
-      {/* Machine title */}
-      <div>
-        <h2 className="text-[20px] font-black font-sans text-[#e8ecf4] tracking-widest leading-none">
-          {machine.name.toUpperCase()}
-        </h2>
-        <p className="text-[10px] text-[#38bdf8] tracking-[0.25em] mt-0.5">REAL-TIME SENSOR TELEMETRY — {machine.type} — {machine.location}</p>
-      </div>
-
-      {/* 4 gauges */}
-      <div className="flex gap-2">
-        <CircularGauge label="Temperature" value={sd.temperature} unit="°C"   min={20}  max={150}  threshold={machine.normalRanges?.temperature?.max ?? 100} icon={<Thermometer className="w-4 h-4" />} />
-        <CircularGauge label="Vibration"   value={sd.vibration}   unit="mm/s" min={0}   max={10}   threshold={machine.normalRanges?.vibration?.max ?? 3}   icon={<Activity className="w-4 h-4" />} />
-        <CircularGauge label="RPM"         value={sd.rpm}         unit="rpm"  min={500} max={5500} threshold={machine.normalRanges?.rpm?.max ?? 3500}         icon={<Gauge className="w-4 h-4" />} />
-        <CircularGauge label="Pressure"    value={sd.pressure}    unit="bar"  min={20}  max={140}  threshold={machine.normalRanges?.pressure?.max ?? 100}    icon={<Activity className="w-4 h-4" />} />
-      </div>
-
-      {/* ML Confidence */}
-      <div className="bg-[#111827] border border-[#1e293b] rounded-lg px-4 py-2 flex items-center gap-3" style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.02)' }}>
-        <span className="text-[10px] text-[#64748b] tracking-widest shrink-0">ML CONFIDENCE</span>
-        <div className="flex-1 h-1.5 bg-[#1e293b] rounded-full overflow-hidden">
-          <div className="h-full bg-[#38bdf8] rounded-full" style={{ width: '94.7%', boxShadow: '0 0 10px rgba(56,189,248,0.3)' }} />
+    <main className="flex min-w-0 flex-1 flex-col gap-6 bg-page p-6 lg:overflow-y-auto">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-[28px] font-medium leading-tight text-fg">{machine.name}</h1>
+          <p className="mt-1 text-[14px] text-fg-2">{machine.type} · {machine.location}</p>
         </div>
-        <span className="text-[13px] font-bold text-[#38bdf8] font-mono">94.7%</span>
-        <span className="text-[10px] text-[#475569] shrink-0">Isolation Forest + Keras Autoencoder</span>
+        <p className="flex items-center gap-2 text-[14px]">
+          <span className={`h-2 w-2 rounded-full ${status.dot}`} />
+          <span className={status.text}>{status.label}</span>
+        </p>
       </div>
+
+      {/* Instrument cluster */}
+      <section className="rounded-2xl border border-line bg-panel" aria-label="Live sensor instruments">
+        <div className="grid grid-cols-2 divide-line md:grid-cols-4 md:divide-x">
+          {SENSORS.map(s => (
+            <Instrument
+              key={s.key}
+              label={s.label}
+              unit={s.unit}
+              value={sd[s.key]}
+              decimals={s.decimals}
+              scale={s.scale}
+              band={machine.normalRanges[s.key]}
+            />
+          ))}
+        </div>
+        <div className="grid grid-cols-1 gap-4 border-t border-line px-5 py-4 sm:grid-cols-[1fr_auto_auto] sm:items-center sm:gap-8">
+          <div className="flex items-center gap-3">
+            <span className="w-24 shrink-0 text-[13px] text-fg-2">Health score</span>
+            <div className="h-1 flex-1 overflow-hidden rounded-full bg-raised">
+              <div className="h-full w-full origin-left rounded-full transition-transform duration-300 ease-out-quint" style={{ transform: `scaleX(${health / 100})`, backgroundColor: healthColor }} />
+            </div>
+            <span className="w-10 text-right font-mono text-[14px] tabular-nums text-fg">{health.toFixed(0)}</span>
+          </div>
+          <p className="text-[13px] text-fg-2">Failure risk <span className="ml-1 font-mono tabular-nums text-fg">{sd.failureProbability.toFixed(0)}%</span></p>
+          <p className="text-[13px] text-fg-2">Time to failure <span className="ml-1 font-mono text-fg">{sd.timeToFailure}</span></p>
+        </div>
+      </section>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-[#111827] border border-[#1e293b] rounded-lg p-1" style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.02)' }}>
-        {([['twin','Digital Twin'],['charts','Sensor Charts'],['roi','ROI Calculator']] as [Tab, string][]).map(([key, lbl]) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={`flex-1 text-[11px] py-2 rounded-md font-sans tracking-wider transition-all ${
-              tab === key
-                ? 'bg-[#00c896]/10 text-[#00c896] border border-[#00c896]/25'
-                : 'text-[#64748b] hover:text-[#94a3b8]'
-            }`}
-          >
-            {lbl}
-          </button>
-        ))}
-      </div>
+      <section className="rounded-2xl border border-line bg-panel">
+        <div className="flex gap-1 border-b border-line px-3 pt-2" role="tablist">
+          {([['twin', 'Digital twin'], ['charts', 'Sensor charts'], ['roi', 'ROI calculator']] as [Tab, string][]).map(([key, lbl]) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={tab === key}
+              onClick={() => setTab(key)}
+              className={`-mb-px h-10 border-b-2 px-3 text-[13px] transition-colors duration-150 ${
+                tab === key ? 'border-signal text-fg' : 'border-transparent text-fg-3 hover:text-fg-2'
+              }`}
+            >
+              {lbl}
+            </button>
+          ))}
+        </div>
+        <div key={tab} className="animate-enter p-5">
+          {tab === 'twin'   && <DigitalTwin machine={machine} />}
+          {tab === 'charts' && <SensorCharts machine={machine} />}
+          {tab === 'roi'    && <ROICalculator />}
+        </div>
+      </section>
 
-      {/* Tab content */}
-      <div className="bg-[#111827] border border-[#1e293b] rounded-lg p-4 animate-fadeInUp" style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.02)' }}>
-        {tab === 'twin'   && <DigitalTwin machine={machine} />}
-        {tab === 'charts' && <SensorCharts history={machine.history} />}
-        {tab === 'roi'    && <ROICalculator />}
-      </div>
-
-      {/* AI Insight Banner */}
-      <AIInsightBanner machine={machine} />
+      <Assessment machine={machine} />
     </main>
   )
 }

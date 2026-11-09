@@ -1,8 +1,15 @@
 'use client'
 
 import { useState } from 'react'
-import { Users, Plus, X, Mail, Phone } from 'lucide-react'
+import { Plus, X } from 'lucide-react'
 import type { Mechanic, Machine } from '@/lib/sentinel-types'
+
+const fieldClass = 'h-9 w-full rounded-lg border border-line bg-deep px-3 text-[13px] text-fg placeholder:text-fg-3 transition-colors duration-150 focus:border-signal/60 focus:outline-none'
+const labelClass = 'mb-2 block text-[12px] text-fg-2'
+
+const STATUS_DOT: Record<Mechanic['status'], string> = { 'available': 'bg-ok', 'on-duty': 'bg-warn', 'off-shift': 'bg-fg-3' }
+const STATUS_LABEL: Record<Mechanic['status'], string> = { 'available': 'Available', 'on-duty': 'On a job', 'off-shift': 'Off shift' }
+const SHIFT_LABEL: Record<Mechanic['shift'], string> = { morning: 'Morning shift', evening: 'Evening shift', night: 'Night shift' }
 
 // ─── Add Mechanic Modal ────────────────────────────────────────────
 interface AddMechanicModalProps {
@@ -16,7 +23,8 @@ function AddMechanicModal({ isOpen, machines, onClose, onAdd }: AddMechanicModal
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
-  const [machine, setMachine] = useState(machines[0]?.id || '')
+  // Alerts find a machine's mechanic by machine name, so store the name
+  const [machine, setMachine] = useState(machines[0]?.name || '')
   const [shift, setShift] = useState<'morning' | 'evening' | 'night'>('morning')
 
   const handleSubmit = () => {
@@ -32,97 +40,64 @@ function AddMechanicModal({ isOpen, machines, onClose, onAdd }: AddMechanicModal
     setName('')
     setEmail('')
     setPhone('')
-    setMachine(machines[0]?.id || '')
+    setMachine(machines[0]?.name || '')
     setShift('morning')
   }
 
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-[#111827] border border-[#1e293b] rounded-xl w-full max-w-sm p-6" style={{ boxShadow: '0 25px 60px rgba(0,0,0,0.5), 0 0 40px rgba(0,200,150,0.05)' }}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-[13px] font-bold text-[#e8ecf4] tracking-wider">ADD MECHANIC</h2>
-          <button onClick={onClose} className="text-[#64748b] hover:text-[#e8ecf4] transition-colors">
-            <X className="w-4 h-4" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div role="dialog" aria-modal="true" aria-labelledby="add-mechanic-title" className="animate-enter w-full max-w-sm rounded-2xl border border-line bg-panel shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
+        <div className="flex items-center justify-between border-b border-line px-6 py-4">
+          <h2 id="add-mechanic-title" className="text-[16px] font-medium text-fg">Add mechanic</h2>
+          <button onClick={onClose} aria-label="Close" className="rounded-md p-1 text-fg-3 transition-colors duration-150 hover:text-fg">
+            <X className="h-4 w-4" strokeWidth={1.5} />
           </button>
         </div>
 
-        <div className="space-y-3 mb-6">
+        <div className="space-y-4 p-6">
           <div>
-            <label className="text-[10px] text-[#64748b] font-mono block mb-1">NAME</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="John Smith"
-              className="w-full bg-[#0a0e17] border border-[#1e293b] text-[#e8ecf4] text-[11px] rounded-lg px-3 py-2 focus:outline-none focus:border-[#00c896]/40 placeholder-[#475569] transition-colors"
-            />
+            <label className={labelClass}>Name</label>
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="John Smith" className={fieldClass} />
           </div>
-
           <div>
-            <label className="text-[10px] text-[#64748b] font-mono block mb-1">EMAIL</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="john@facility.com"
-              className="w-full bg-[#0a0e17] border border-[#1e293b] text-[#e8ecf4] text-[11px] rounded-lg px-3 py-2 focus:outline-none focus:border-[#00c896]/40 placeholder-[#475569] transition-colors"
-            />
+            <label className={labelClass}>Email</label>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="john@facility.com" className={fieldClass} />
           </div>
-
           <div>
-            <label className="text-[10px] text-[#64748b] font-mono block mb-1">PHONE</label>
-            <input
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="+1 (555) 123-4567"
-              className="w-full bg-[#0a0e17] border border-[#1e293b] text-[#e8ecf4] text-[11px] rounded-lg px-3 py-2 focus:outline-none focus:border-[#00c896]/40 placeholder-[#475569] transition-colors"
-            />
+            <label className={labelClass}>Phone</label>
+            <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+1 555 123 4567" className={fieldClass} />
           </div>
-
           <div>
-            <label className="text-[10px] text-[#64748b] font-mono block mb-1">ASSIGN TO MACHINE</label>
-            <select
-              value={machine}
-              onChange={(e) => setMachine(e.target.value)}
-              className="w-full bg-[#0a0e17] border border-[#1e293b] text-[#e8ecf4] text-[11px] rounded-lg px-3 py-2 focus:outline-none focus:border-[#00c896]/40"
-            >
+            <label className={labelClass}>Machine</label>
+            <select value={machine} onChange={(e) => setMachine(e.target.value)} className={fieldClass}>
               {machines.map(m => (
-                <option key={m.id} value={m.id}>{m.name}</option>
+                <option key={m.id} value={m.name}>{m.name}</option>
               ))}
             </select>
           </div>
-
           <div>
-            <label className="text-[10px] text-[#64748b] font-mono block mb-1">SHIFT</label>
-            <select
-              value={shift}
-              onChange={(e) => setShift(e.target.value as 'morning' | 'evening' | 'night')}
-              className="w-full bg-[#0a0e17] border border-[#1e293b] text-[#e8ecf4] text-[11px] rounded-lg px-3 py-2 focus:outline-none focus:border-[#00c896]/40"
-            >
-              <option value="morning">Morning (6AM - 2PM)</option>
-              <option value="evening">Evening (2PM - 10PM)</option>
-              <option value="night">Night (10PM - 6AM)</option>
+            <label className={labelClass}>Shift</label>
+            <select value={shift} onChange={(e) => setShift(e.target.value as 'morning' | 'evening' | 'night')} className={fieldClass}>
+              <option value="morning">Morning, 06:00–14:00</option>
+              <option value="evening">Evening, 14:00–22:00</option>
+              <option value="night">Night, 22:00–06:00</option>
             </select>
           </div>
-        </div>
 
-        <div className="flex gap-2">
-          <button
-            onClick={onClose}
-            className="flex-1 bg-[#151c2c] border border-[#1e293b] text-[#64748b] text-[11px] py-2 rounded-lg hover:border-[#2d3a52] hover:text-[#94a3b8] transition-colors"
-          >
-            CANCEL
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={!name.trim() || !email.trim() || !phone.trim()}
-            className="flex-1 bg-[#00c896]/10 border border-[#00c896]/30 text-[#00c896] text-[11px] py-2 rounded-lg hover:bg-[#00c896]/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            ADD
-          </button>
+          <div className="flex justify-end gap-2 pt-2">
+            <button onClick={onClose} className="h-9 rounded-lg border border-line bg-raised px-4 text-[13px] text-fg transition-colors duration-150 hover:border-line-strong">
+              Cancel
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={!name.trim() || !email.trim() || !phone.trim()}
+              className="h-9 rounded-lg bg-fg px-4 text-[13px] font-medium text-page transition-colors duration-150 hover:bg-white active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Add mechanic
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -136,46 +111,27 @@ interface MechanicCardProps {
   onPreviewEmail: (mechanic: Mechanic) => void
 }
 
-function MechanicCard({ mechanic, onDelete, onPreviewEmail }: MechanicCardProps) {
-  const statusColor = {
-    'available': 'bg-[#00c896]',
-    'on-duty': 'bg-[#e5a000]',
-    'off-shift': 'bg-[#64748b]',
-  }[mechanic.status]
-
+function MechanicCard({ mechanic, onDelete }: MechanicCardProps) {
   return (
-    <div className="bg-[#0f1623] border border-[#1e293b] rounded-lg p-3 animate-slideInUp" style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.02)' }}>
-      <div className="flex items-start justify-between mb-2">
-        <div className="flex-1">
-          <p className="text-[11px] font-bold text-[#e8ecf4] truncate">{mechanic.name}</p>
-          <p className="text-[9px] text-[#64748b]">{mechanic.assignedMachine}</p>
-        </div>
+    <div className="group border-b border-line px-4 py-3 last:border-b-0">
+      <div className="flex items-center gap-2">
+        <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[mechanic.status]}`} title={STATUS_LABEL[mechanic.status]} />
+        <p className="truncate text-[13px] font-medium text-fg">{mechanic.name}</p>
+        <span className="truncate text-[13px] text-fg-3">· {mechanic.assignedMachine}</span>
         <button
           onClick={() => onDelete(mechanic.id)}
-          className="text-[#475569] hover:text-[#ef4444] ml-2 transition-colors"
+          aria-label={`Remove ${mechanic.name}`}
+          className="ml-auto shrink-0 rounded-md p-1 text-fg-3 opacity-60 transition-[color,opacity] duration-150 hover:text-crit hover:opacity-100 group-hover:opacity-100"
         >
-          <X className="w-3.5 h-3.5" />
+          <X className="h-4 w-4" strokeWidth={1.5} />
         </button>
       </div>
-
-      <div className="space-y-1.5 mb-2">
-        <div className="flex items-center gap-2 text-[10px]">
-          <Mail className="w-3 h-3 text-[#38bdf8]" />
-          <span className="text-[#94a3b8] truncate">{mechanic.email}</span>
-        </div>
-        <div className="flex items-center gap-2 text-[10px]">
-          <Phone className="w-3 h-3 text-[#38bdf8]" />
-          <span className="text-[#94a3b8]">{mechanic.phone}</span>
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between pt-2 border-t border-[#1e293b]">
-        <div className="flex items-center gap-2">
-          <span className={`w-2 h-2 rounded-full ${statusColor}`} />
-          <span className="text-[9px] text-[#64748b] uppercase">{mechanic.status.replace('-', ' ')}</span>
-        </div>
-        <span className="text-[8px] text-[#475569] uppercase tracking-wider">{mechanic.shift}</span>
-      </div>
+      <p className="mt-1 pl-4 text-[12px] text-fg-2">
+        {STATUS_LABEL[mechanic.status]} · {SHIFT_LABEL[mechanic.shift]}
+      </p>
+      <p className="mt-1 truncate pl-4 font-mono text-[12px] text-fg-3">
+        {mechanic.email} · {mechanic.phone}
+      </p>
     </div>
   )
 }
@@ -194,21 +150,20 @@ export default function MechanicPanel({ mechanics, machines, onAddMechanic, onDe
 
   return (
     <>
-      <div className="bg-[#111827] border border-[#1e293b] rounded-lg" style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.02)' }}>
-        <div className="flex items-center gap-2 px-3 py-2.5 border-b border-[#1e293b]">
-          <Users className="w-3.5 h-3.5 text-[#00c896]" />
-          <p className="text-[11px] font-sans font-bold text-[#e8ecf4] tracking-wider flex-1">MECHANIC ASSIGNMENTS</p>
+      <section className="rounded-xl border border-line bg-panel">
+        <div className="flex h-12 items-center justify-between border-b border-line px-4">
+          <h3 className="text-[14px] font-medium text-fg">Mechanics</h3>
           <button
             onClick={() => setShowModal(true)}
-            className="flex items-center gap-1 bg-[#00c896]/8 border border-[#00c896]/25 text-[#00c896] px-2 py-1 rounded-md text-[9px] hover:bg-[#00c896]/15 transition-colors"
+            className="flex h-8 items-center gap-1 rounded-lg px-2 text-[12px] text-fg-2 transition-colors duration-150 hover:bg-raised hover:text-fg"
           >
-            <Plus className="w-3 h-3" />
-            ADD
+            <Plus className="h-4 w-4" strokeWidth={1.5} />
+            Add
           </button>
         </div>
-        <div className="p-3 grid grid-cols-2 gap-2 max-h-[320px] overflow-y-auto">
+        <div className="max-h-[320px] overflow-y-auto">
           {mechanics.length === 0 ? (
-            <p className="col-span-2 text-[11px] text-[#64748b] text-center py-4">No mechanics assigned</p>
+            <p className="py-8 text-center text-[13px] text-fg-3">No mechanics assigned</p>
           ) : (
             mechanics.map(m => (
               <MechanicCard
@@ -220,7 +175,7 @@ export default function MechanicPanel({ mechanics, machines, onAddMechanic, onDe
             ))
           )}
         </div>
-      </div>
+      </section>
 
       <AddMechanicModal
         isOpen={showModal}

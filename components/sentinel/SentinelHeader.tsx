@@ -1,43 +1,44 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Activity, Cpu, AlertTriangle, TrendingUp, DollarSign } from 'lucide-react'
+import type { Machine } from '@/lib/sentinel-types'
 
-interface MetricCardProps {
-  icon: React.ReactNode
+interface StatProps {
   label: string
   value: string | number
-  sub?: string
-  color?: 'green' | 'red' | 'amber' | 'blue'
+  detail: string
+  tone?: 'default' | 'crit' | 'warn'
 }
 
-function MetricCard({ icon, label, value, sub, color = 'green' }: MetricCardProps) {
-  const colorMap = {
-    green: { border: 'border-[#00c896]/20', text: 'text-[#00c896]', glow: 'box-glow-green' },
-    red:   { border: 'border-[#ef4444]/20', text: 'text-[#ef4444]', glow: 'box-glow-red' },
-    amber: { border: 'border-[#e5a000]/20', text: 'text-[#e5a000]', glow: 'box-glow-amber' },
-    blue:  { border: 'border-[#38bdf8]/20', text: 'text-[#38bdf8]', glow: '' },
-  }
-  const c = colorMap[color]
+function Stat({ label, value, detail, tone = 'default' }: StatProps) {
+  const valueColor = tone === 'crit' ? 'text-crit' : tone === 'warn' ? 'text-warn' : 'text-fg'
   return (
-    <div className={`flex-1 bg-[#111827] border ${c.border} rounded-lg px-4 py-3 flex items-center gap-3 ${c.glow} transition-all duration-300 hover:bg-[#151c2c]`}>
-      <div className={`${c.text} shrink-0 opacity-80`}>{icon}</div>
-      <div className="min-w-0">
-        <p className="text-[10px] text-[#64748b] tracking-widest uppercase truncate">{label}</p>
-        <p className={`text-xl font-bold ${c.text} font-sans leading-tight`}>{value}</p>
-        {sub && <p className="text-[10px] text-[#475569]">{sub}</p>}
-      </div>
+    <div className="bg-panel border border-line rounded-xl px-5 py-4">
+      <p className="text-[13px] text-fg-2">{label}</p>
+      <p className={`mt-2 font-mono text-[28px] leading-none font-medium tabular-nums ${valueColor}`}>{value}</p>
+      <p className="mt-2 text-[12px] text-fg-3">{detail}</p>
     </div>
   )
 }
 
-interface SentinelHeaderProps {
-  criticalCount: number
-  uptime: number
-  machineCount: number
+// A dial with its needle: the product's mark, flat and in one color
+function DialMark() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M3.5 14.5a7.5 7.5 0 1 1 13 0" stroke="#ededed" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M10 11.5 13.5 6" stroke="#ededed" strokeWidth="1.5" strokeLinecap="round" />
+      <circle cx="10" cy="11.5" r="1.5" fill="#ededed" />
+    </svg>
+  )
 }
 
-export default function SentinelHeader({ criticalCount, uptime, machineCount }: SentinelHeaderProps) {
+interface SentinelHeaderProps {
+  machines: Machine[]
+  criticalCount: number
+  isConnected: boolean
+}
+
+export default function SentinelHeader({ machines, criticalCount, isConnected }: SentinelHeaderProps) {
   const [now, setNow] = useState<Date | null>(null)
 
   useEffect(() => {
@@ -47,80 +48,50 @@ export default function SentinelHeader({ criticalCount, uptime, machineCount }: 
   }, [])
 
   const dateStr = now
-    ? now.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })
-    : '\u00A0'
+    ? now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+    : ' '
   const timeStr = now
     ? now.toLocaleTimeString('en-US', { hour12: false })
-    : '\u00A0'
+    : ' '
+
+  const critical = machines.filter(m => m.status === 'critical').length
+  const degrading = machines.filter(m => m.status === 'warning').length
+  const inRange = machines.length - critical - degrading
+  const avgHealth = machines.length
+    ? Math.round(machines.reduce((sum, m) => sum + m.sensorData.health, 0) / machines.length)
+    : 0
 
   return (
-    <header className="bg-[#0f1623] border-b border-[#1e293b] px-4 py-3 shrink-0" style={{ boxShadow: '0 1px 8px rgba(0,0,0,0.3)' }}>
-      {/* Top row */}
-      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        {/* Logo */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-lg border border-[#00c896]/30 flex items-center justify-center bg-[#00c896]/5" style={{ boxShadow: '0 0 20px rgba(0,200,150,0.1)' }}>
-              <Activity className="w-4 h-4 text-[#00c896]" />
-            </div>
-            <div>
-              <h1 className="text-[22px] font-black font-sans text-[#00c896] glow-green tracking-widest leading-none">
-                SENTINEL AI
-              </h1>
-              <p className="text-[9px] text-[#00c896]/40 tracking-[0.3em] font-mono">PREDICTIVE MAINTENANCE v3.0</p>
-            </div>
-          </div>
+    <header className="shrink-0 border-b border-line bg-deep px-6 pt-4 pb-6">
+      <div className="flex min-h-10 flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex items-center gap-3 whitespace-nowrap">
+          <DialMark />
+          <p className="text-[17px] font-medium leading-none text-fg">Sentinel AI</p>
+          <span className="h-4 w-px bg-line-strong" />
+          <p className="text-[13px] text-fg-2">Plant-7 North</p>
         </div>
 
-        {/* Center status */}
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-[#00c896] animate-pulse-dot" style={{ boxShadow: '0 0 8px rgba(0,200,150,0.6)' }} />
-            <span className="text-[10px] text-[#00c896] tracking-widest">SYSTEM LIVE</span>
+        <div className="flex items-center gap-4 whitespace-nowrap text-[13px]">
+          <div className="flex items-center gap-2" title={isConnected ? 'Receiving live readings from the backend' : 'Waiting for the backend, showing last known data'}>
+            <span className={`h-2 w-2 rounded-full ${isConnected ? 'bg-ok' : 'bg-warn'}`} />
+            <span className="text-fg-2">{isConnected ? 'Live' : 'Reconnecting'}</span>
           </div>
-          <div className="h-4 w-px bg-[#1e293b]" />
-          <div className="text-right">
-            <p className="text-[10px] text-[#64748b] tracking-wider">{dateStr}</p>
-            <p className="text-[13px] text-[#e8ecf4] font-mono tracking-widest">{timeStr}</p>
-          </div>
-          <div className="h-4 w-px bg-[#1e293b]" />
-          <div className="text-right">
-            <p className="text-[9px] text-[#64748b] tracking-widest">FACILITY</p>
-            <p className="text-[11px] text-[#38bdf8] font-sans font-bold tracking-widest">PLANT-7 NORTH</p>
-          </div>
+          <span className="hidden h-4 w-px bg-line-strong sm:block" />
+          <p className="hidden text-fg-3 sm:block">{dateStr}</p>
+          <p className="w-[72px] font-mono tabular-nums text-fg">{timeStr}</p>
         </div>
       </div>
 
-      {/* Metric cards */}
-      <div className="flex gap-3">
-        <MetricCard
-          icon={<Cpu className="w-5 h-5" />}
-          label="Machines Monitored"
-          value={machineCount}
-          sub="active sensors"
-          color="green"
+      <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <Stat label="Machines monitored" value={machines.length} detail={`${inRange} within normal range`} />
+        <Stat
+          label="Need attention"
+          value={critical + degrading}
+          detail={`${critical} critical, ${degrading} degrading`}
+          tone={critical > 0 ? 'crit' : degrading > 0 ? 'warn' : 'default'}
         />
-        <MetricCard
-          icon={<AlertTriangle className="w-5 h-5" />}
-          label="Critical Alerts"
-          value={criticalCount}
-          sub="last 24h"
-          color={criticalCount > 0 ? 'red' : 'green'}
-        />
-        <MetricCard
-          icon={<TrendingUp className="w-5 h-5" />}
-          label="System Uptime"
-          value={`${uptime.toFixed(1)}%`}
-          sub="30-day avg"
-          color="green"
-        />
-        <MetricCard
-          icon={<DollarSign className="w-5 h-5" />}
-          label="Est. Annual Savings"
-          value="$2.4M"
-          sub="vs reactive maintenance"
-          color="amber"
-        />
+        <Stat label="Average health" value={`${avgHealth}%`} detail="Across all machines, live" />
+        <Stat label="Critical alerts" value={criticalCount} detail="In the alert feed" tone={criticalCount > 0 ? 'crit' : 'default'} />
       </div>
     </header>
   )

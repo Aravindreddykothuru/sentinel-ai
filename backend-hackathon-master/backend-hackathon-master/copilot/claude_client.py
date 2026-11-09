@@ -62,6 +62,7 @@ Guidelines:
 4. Reference specific sensor data when available
 5. Suggest next steps clearly
 6. If unsure, recommend consulting a senior technician
+7. Keep it under 150 words and do not use emoji
 
 Current time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
 """

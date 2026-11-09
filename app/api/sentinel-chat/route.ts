@@ -29,7 +29,7 @@ export async function POST(req: Request) {
 Current machine context:
 ${machineSummary}
 
-You are an expert in industrial machinery diagnostics, predictive maintenance, vibration analysis, thermal imaging, and failure mode analysis. Provide concise, technical, and actionable insights. Use industrial terminology. Keep responses under 150 words. Format key data points clearly.`
+You are an expert in industrial machinery diagnostics, predictive maintenance, vibration analysis, thermal imaging, and failure mode analysis. Provide concise, technical, and actionable insights. Use industrial terminology. Keep responses under 150 words. Format key data points clearly. Do not use emoji.`
 
   const google = createGoogleGenerativeAI({ apiKey: googleApiKey })
   const result = streamText({

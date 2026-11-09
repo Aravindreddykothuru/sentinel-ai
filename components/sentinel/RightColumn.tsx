@@ -3,7 +3,7 @@
 import { useRef, useEffect, useState } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
-import { Send, Bot, Wrench, AlertTriangle } from 'lucide-react'
+import { ArrowUp } from 'lucide-react'
 import type { Alert, MaintenanceItem, Machine, Mechanic, NotificationLog } from '@/lib/sentinel-types'
 import MechanicPanel from './MechanicPanel'
 import NotificationLogComponent from './NotificationLog'
@@ -12,6 +12,34 @@ import { EmailPreview } from './EmailPreview'
 function getMessageText(parts: Array<{ type: string; text?: string }>): string {
   return parts.filter((p): p is { type: 'text'; text: string } => p.type === 'text').map(p => p.text).join('')
 }
+
+// Gemini answers in Markdown; show headings, emphasis and lists without the raw symbols
+function FormattedAnswer({ text }: { text: string }) {
+  return (
+    <>
+      {text.split('\n').map((line, i) => {
+        if (!line.trim()) return <div key={i} className="h-2" />
+        const heading = /^\s*#{1,6}\s+/.test(line)
+        const bullet = /^\s*([*-]|\d+\.)\s+/.test(line)
+        const marker = bullet ? line.match(/^\s*([*-]|\d+\.)\s+/)![1] : ''
+        const clean = line.replace(/^\s*#{1,6}\s+/, '').replace(/^\s*([*-]|\d+\.)\s+/, '')
+        // Odd parts were wrapped in **…**
+        const content = clean.split(/\*\*(.+?)\*\*/g).map((part, j) =>
+          j % 2 ? <span key={j} className="font-medium text-fg">{part}</span> : part.replace(/\*([^*\s][^*]*?)\*/g, '$1'),
+        )
+        return (
+          <p key={i} className={heading ? 'font-medium text-fg' : bullet ? 'flex gap-2' : ''}>
+            {bullet && <span className="shrink-0 text-fg-3">{/\d/.test(marker) ? marker : '•'}</span>}
+            {bullet ? <span>{content}</span> : content}
+          </p>
+        )
+      })}
+    </>
+  )
+}
+
+const LEVEL_DOT: Record<Alert['level'], string> = { critical: 'bg-crit', warning: 'bg-warn', info: 'bg-fg-3' }
+const PRIORITY_DOT: Record<MaintenanceItem['priority'], string> = { critical: 'bg-crit', warning: 'bg-warn', ok: 'bg-ok' }
 
 // ─── AI Copilot Chat ───────────────────────────────────────────────
 interface AICopilotChatProps {
@@ -68,97 +96,79 @@ export function AICopilotChat({ machine }: AICopilotChatProps) {
   const isStreaming = status === 'streaming' || status === 'submitted'
 
   return (
-    <div className="bg-[#111827] border border-[#1e293b] rounded-lg flex flex-col" style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.02)' }}>
-      {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-[#1e293b]"
-        style={{ background: 'linear-gradient(135deg, rgba(56,189,248,0.06) 0%, rgba(0,200,150,0.03) 100%)' }}>
-        <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
-          style={{ background: 'linear-gradient(135deg, #38bdf8, #0284c7)', boxShadow: '0 0 12px rgba(56,189,248,0.3)' }}>
-          <Bot className="w-3.5 h-3.5 text-[#0a0e17]" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-[11px] font-sans font-bold text-[#e8ecf4] tracking-wider leading-none">AI COPILOT</p>
-          <p className="text-[9px] text-[#64748b]">Powered by Claude AI</p>
-        </div>
-        <span className="w-1.5 h-1.5 rounded-full bg-[#00c896] animate-pulse-dot" style={{ boxShadow: '0 0 6px rgba(0,200,150,0.5)' }} />
+    <section className="flex flex-col rounded-xl border border-line bg-panel">
+      <div className="flex h-12 items-center justify-between border-b border-line px-4">
+        <h3 className="text-[14px] font-medium text-fg">Copilot</h3>
+        <span className="font-mono text-[12px] text-fg-3">Gemini</span>
       </div>
 
-      {/* Messages */}
-      <div ref={messagesRef} className="h-[260px] overflow-y-auto p-3 flex flex-col gap-2">
+      <div ref={messagesRef} className="flex h-[264px] flex-col gap-3 overflow-y-auto p-4">
         {messages.length === 0 && (
-          <div className="text-center py-6">
-            <Bot className="w-8 h-8 text-[#1e293b] mx-auto mb-2" />
-            <p className="text-[11px] text-[#64748b]">Ask me about {machine.name}</p>
-          </div>
+          <p className="m-auto max-w-[24ch] text-center text-[13px] leading-5 text-fg-3">
+            Ask about {machine.name}. Answers use its live readings.
+          </p>
         )}
         {messages.map((m) => {
           const text = getMessageText(m.parts as Array<{ type: string; text?: string }>)
           if (!text) return null
-          return (
-            <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-fadeInUp`}>
-              <div className={`max-w-[85%] rounded-lg px-3 py-2 text-[11px] leading-relaxed ${
-                m.role === 'user'
-                  ? 'bg-[#38bdf8]/10 border border-[#38bdf8]/25 text-[#e8ecf4]'
-                  : 'bg-[#0f1623] border border-[#1e293b] text-[#94a3b8]'
-              }`}>
-                {text}
-              </div>
+          return m.role === 'user' ? (
+            <div key={m.id} className="ml-auto max-w-[85%] rounded-xl rounded-br-sm bg-raised px-3 py-2 text-[13px] leading-5 text-fg">
+              {text}
+            </div>
+          ) : (
+            <div key={m.id} data-role="assistant" className="max-w-[95%] text-[13px] leading-5 text-fg-2">
+              <FormattedAnswer text={text} />
             </div>
           )
         })}
         {isStreaming && (
-          <div className="flex justify-start">
-            <div className="bg-[#0f1623] border border-[#1e293b] rounded-lg px-3 py-2.5 flex items-center gap-1">
-              {[0, 150, 300].map(d => (
-                <span key={d} className="w-1.5 h-1.5 rounded-full bg-[#38bdf8] animate-bounce-dot" style={{ animationDelay: `${d}ms` }} />
-              ))}
-            </div>
+          <div className="flex gap-1 py-2" aria-label="Copilot is answering">
+            {[0, 160, 320].map(d => (
+              <span key={d} className="animate-typing h-1.5 w-1.5 rounded-full bg-fg-3" style={{ animationDelay: `${d}ms` }} />
+            ))}
           </div>
         )}
         {error && !isStreaming && (
-          <div className="flex justify-start">
-            <div className="max-w-[85%] rounded-lg px-3 py-2 text-[11px] leading-relaxed bg-[#ef4444]/10 border border-[#ef4444]/25 text-[#ef4444]">
-              {error.message || 'The AI copilot could not answer right now.'}
-            </div>
-          </div>
+          <p className="text-[13px] leading-5 text-crit">
+            {error.message || 'The copilot could not answer right now'}
+          </p>
         )}
       </div>
 
-      {/* Quick prompts */}
-      <div className="px-3 pb-2 flex flex-col gap-1">
-        <div className="grid grid-cols-2 gap-1">
-          {QUICK_PROMPTS.map(p => (
-            <button
-              key={p}
-              onClick={() => handleSend(p)}
-              disabled={isStreaming}
-              className="text-[9px] bg-[#0f1623] border border-[#1e293b] text-[#64748b] py-1.5 px-2 rounded-md hover:border-[#38bdf8]/25 hover:text-[#94a3b8] transition-colors text-left disabled:opacity-40 truncate"
-            >
-              {p}
-            </button>
-          ))}
-        </div>
+      <div className="grid grid-cols-2 gap-2 px-4 pb-3">
+        {QUICK_PROMPTS.map(p => (
+          <button
+            key={p}
+            onClick={() => handleSend(p)}
+            disabled={isStreaming}
+            title={p}
+            className="h-8 truncate rounded-lg border border-line px-2 text-left text-[12px] text-fg-2 transition-colors duration-150 hover:border-line-strong hover:text-fg disabled:opacity-40"
+          >
+            {p}
+          </button>
+        ))}
       </div>
 
-      {/* Input */}
-      <div className="flex gap-2 px-3 pb-3">
+      <div className="flex gap-2 border-t border-line p-3">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend(input)}
-          placeholder="Ask about sensor data..."
+          placeholder={`Ask about ${machine.name}`}
+          aria-label="Message the copilot"
           disabled={isStreaming}
-          className="flex-1 bg-[#0a0e17] border border-[#1e293b] text-[#e8ecf4] text-[11px] rounded-lg px-3 py-2 focus:outline-none focus:border-[#38bdf8]/40 placeholder-[#475569] disabled:opacity-50 transition-colors"
+          className="h-9 min-w-0 flex-1 rounded-lg border border-line bg-deep px-3 text-[13px] text-fg placeholder:text-fg-3 transition-colors duration-150 focus:border-signal/60 focus:outline-none disabled:opacity-50"
         />
         <button
           onClick={() => handleSend(input)}
           disabled={isStreaming || !input.trim()}
-          className="bg-[#38bdf8]/10 border border-[#38bdf8]/30 text-[#38bdf8] px-3 rounded-lg hover:bg-[#38bdf8]/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          aria-label="Send"
+          className="flex h-9 w-9 items-center justify-center rounded-lg bg-fg text-page transition-colors duration-150 hover:bg-white active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-30"
         >
-          <Send className="w-3.5 h-3.5" />
+          <ArrowUp className="h-4 w-4" strokeWidth={1.75} />
         </button>
       </div>
-    </div>
+    </section>
   )
 }
 
@@ -168,49 +178,30 @@ interface LiveAlertsProps {
 }
 
 export function LiveAlerts({ alerts }: LiveAlertsProps) {
+  const critical = alerts.filter(a => a.level === 'critical').length
+
   return (
-    <div className="bg-[#111827] border border-[#ef4444]/15 rounded-lg" style={{ boxShadow: '0 0 20px rgba(239,68,68,0.03), inset 0 1px 0 rgba(255,255,255,0.02)' }}>
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-[#1e293b]">
-        <AlertTriangle className="w-3.5 h-3.5 text-[#ef4444]" />
-        <p className="text-[11px] font-sans font-bold text-[#e8ecf4] tracking-wider flex-1">LIVE ALERTS</p>
-        <span className={`text-[10px] font-bold font-mono px-2 py-0.5 rounded-full ${alerts.filter(a => a.level === 'critical').length > 0 ? 'bg-[#ef4444]/15 text-[#ef4444]' : 'bg-[#1e293b] text-[#64748b]'}`}>
-          {alerts.filter(a => a.level === 'critical').length} CRITICAL
-        </span>
+    <section className="rounded-xl border border-line bg-panel">
+      <div className="flex h-12 items-center justify-between border-b border-line px-4">
+        <h3 className="text-[14px] font-medium text-fg">Alerts</h3>
+        <span className={`font-mono text-[12px] ${critical > 0 ? 'text-crit' : 'text-fg-3'}`}>{critical} critical</span>
       </div>
-      <div className="max-h-[200px] overflow-y-auto p-2 flex flex-col gap-1.5">
+      <div className="max-h-[248px] overflow-y-auto">
         {alerts.length === 0 && (
-          <p className="text-[11px] text-[#64748b] text-center py-4">No active alerts</p>
+          <p className="py-8 text-center text-[13px] text-fg-3">No active alerts</p>
         )}
         {alerts.map((alert) => (
-          <div
-            key={alert.id}
-            className={`flex items-start gap-2 p-2 rounded-md border animate-slideInAlert ${
-              alert.level === 'critical'
-                ? 'bg-[#ef4444]/5 border-[#ef4444]/15'
-                : alert.level === 'warning'
-                ? 'bg-[#e5a000]/5 border-[#e5a000]/15'
-                : 'bg-[#38bdf8]/5 border-[#38bdf8]/10'
-            }`}
-          >
-            <span className={`w-1.5 h-1.5 rounded-full mt-1 shrink-0 animate-pulse-dot ${
-              alert.level === 'critical' ? 'bg-[#ef4444]' : alert.level === 'warning' ? 'bg-[#e5a000]' : 'bg-[#38bdf8]'
-            }`} />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-0.5">
-                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded font-sans tracking-wider ${
-                  alert.level === 'critical' ? 'bg-[#ef4444]/15 text-[#ef4444]' : alert.level === 'warning' ? 'bg-[#e5a000]/15 text-[#e5a000]' : 'bg-[#38bdf8]/15 text-[#38bdf8]'
-                }`}>
-                  {alert.level.toUpperCase()}
-                </span>
-                <span className="text-[9px] text-[#64748b] truncate">{alert.machine}</span>
-                <span className="text-[9px] text-[#475569] ml-auto shrink-0">{alert.timestamp}</span>
-              </div>
-              <p className="text-[10px] text-[#94a3b8] leading-relaxed">{alert.message}</p>
+          <div key={alert.id} className="border-b border-line px-4 py-3 last:border-b-0">
+            <div className="flex items-center gap-2">
+              <span className={`h-2 w-2 shrink-0 rounded-full ${LEVEL_DOT[alert.level]}`} title={alert.level} />
+              <span className="truncate text-[13px] font-medium text-fg">{alert.machine}</span>
+              <span className="ml-auto shrink-0 font-mono text-[12px] text-fg-3">{alert.timestamp}</span>
             </div>
+            <p className="mt-1 pl-4 text-[13px] leading-5 text-fg-2">{alert.message}</p>
           </div>
         ))}
       </div>
-    </div>
+    </section>
   )
 }
 
@@ -221,42 +212,23 @@ interface MaintenanceProps {
 
 export function MaintenanceSchedule({ items }: MaintenanceProps) {
   return (
-    <div className="bg-[#111827] border border-[#1e293b] rounded-lg" style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.02)' }}>
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-[#1e293b]">
-        <Wrench className="w-3.5 h-3.5 text-[#00c896]" />
-        <p className="text-[11px] font-sans font-bold text-[#e8ecf4] tracking-wider">AI-SCHEDULED MAINTENANCE</p>
+    <section className="rounded-xl border border-line bg-panel">
+      <div className="flex h-12 items-center border-b border-line px-4">
+        <h3 className="text-[14px] font-medium text-fg">Maintenance plan</h3>
       </div>
-      <div className="p-2 flex flex-col gap-2">
+      <div>
         {items.map((item) => (
-          <div
-            key={item.id}
-            className={`p-2.5 rounded-md border-l-2 bg-[#0f1623] ${
-              item.priority === 'critical'
-                ? 'border-l-[#ef4444]'
-                : item.priority === 'warning'
-                ? 'border-l-[#e5a000]'
-                : 'border-l-[#00c896]'
-            }`}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-[11px] font-bold text-[#e8ecf4] font-sans truncate">{item.machine}</p>
-                <p className="text-[10px] text-[#94a3b8] mt-0.5">{item.action}</p>
-                <p className="text-[9px] text-[#64748b] mt-1">{item.scheduledTime}</p>
-              </div>
-              <div className="text-right shrink-0">
-                <p className="text-[9px] text-[#64748b]">Est. Savings</p>
-                <p className={`text-[12px] font-bold font-mono ${
-                  item.priority === 'critical' ? 'text-[#ef4444]' : item.priority === 'warning' ? 'text-[#e5a000]' : 'text-[#00c896]'
-                }`}>
-                  {item.estimatedSavings}
-                </p>
-              </div>
+          <div key={item.id} className="border-b border-line px-4 py-3 last:border-b-0">
+            <div className="flex items-center gap-2">
+              <span className={`h-2 w-2 shrink-0 rounded-full ${PRIORITY_DOT[item.priority]}`} />
+              <span className="truncate text-[13px] font-medium text-fg">{item.machine}</span>
+              <span className="ml-auto shrink-0 font-mono text-[12px] text-fg-3">{item.scheduledTime}</span>
             </div>
+            <p className="mt-1 pl-4 text-[13px] leading-5 text-fg-2">{item.action}</p>
           </div>
         ))}
       </div>
-    </div>
+    </section>
   )
 }
 
@@ -286,7 +258,7 @@ export default function RightColumn({
 
   return (
     <>
-      <aside className="w-[280px] lg:w-[300px] xl:w-[320px] shrink-0 flex flex-col gap-3 overflow-y-auto p-3 bg-[#0c1220]">
+      <aside className="flex w-full shrink-0 flex-col gap-4 border-line bg-deep p-4 lg:w-[340px] lg:overflow-y-auto lg:border-l">
         <AICopilotChat machine={machine} />
         <LiveAlerts alerts={alerts} />
         <MaintenanceSchedule items={maintenance} />
